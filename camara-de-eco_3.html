@@ -1,0 +1,1524 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cámara de Eco</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#0a0d14;
+    --panel:#11151f;
+    --panel-raised:#181e2c;
+    --border:#262f45;
+    --text:#e8ecf6;
+    --text-dim:#8e97b3;
+    --algo:#ff3b6b;
+    --algo-dim:#5c2338;
+    --protocol:#2ee6a6;
+    --protocol-dim:#144a3c;
+    --warn:#ffb454;
+    --id-blue:#35b4ff;
+    --id-blue-rgb:53,180,255;
+    --warn-rgb:255,180,84;
+    --algo-rgb:255,59,107;
+    --font-display:'Share Tech Mono',ui-monospace,'SFMono-Regular',monospace;
+    --font-body:'Sora',system-ui,-apple-system,sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--void);
+    color:var(--text);
+    font-family:var(--font-body);
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    padding:0;
+    line-height:1.5;
+  }
+
+  /* ---------- ambient hijacked-signal texture ---------- */
+  .noise-layer{
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:
+      repeating-linear-gradient(180deg, rgba(255,255,255,.025) 0px, rgba(255,255,255,.025) 1px, transparent 1px, transparent 3px),
+      radial-gradient(ellipse at 20% -10%, rgba(255,59,107,.10), transparent 55%),
+      radial-gradient(ellipse at 85% 110%, rgba(46,230,166,.08), transparent 55%);
+    mix-blend-mode:screen;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .noise-layer{ animation:flicker 6s infinite steps(1); }
+  }
+  @keyframes flicker{
+    0%,92%,100%{opacity:1;} 93%{opacity:.85;} 94%{opacity:1;} 96%{opacity:.9;}
+  }
+
+  .device{
+    position:relative; z-index:1;
+    width:100%; max-width:480px;
+    min-height:100vh;
+    background:var(--panel);
+    border-left:1px solid var(--border);
+    border-right:1px solid var(--border);
+    display:flex; flex-direction:column;
+  }
+
+  /* ---------- HUD status bar ---------- */
+  .hud{
+    position:sticky; top:0; z-index:5;
+    background:linear-gradient(180deg, var(--void), rgba(10,13,20,.96));
+    border-bottom:1px solid var(--border);
+    padding:10px 16px 8px;
+  }
+  .hud-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .signal{
+    font-family:var(--font-display);
+    font-size:11px; letter-spacing:.06em;
+    color:var(--algo);
+    display:flex; align-items:center; gap:6px;
+  }
+  .signal.safe{ color:var(--protocol); }
+  .signal .dot{ width:7px; height:7px; border-radius:50%; background:currentColor; box-shadow:0 0 8px currentColor; }
+  @media (prefers-reduced-motion: no-preference){
+    .signal .dot{ animation:pulse 1.4s ease-in-out infinite; }
+  }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .timer{ font-family:var(--font-display); font-size:11px; color:var(--text-dim); font-variant-numeric:tabular-nums; }
+
+  /* ---------- escape map (HUD) ---------- */
+  .escape-map{ display:flex; align-items:center; margin-top:10px; }
+  .map-node{
+    width:24px; height:24px; border-radius:50%; flex-shrink:0;
+    border:1.5px solid var(--border); background:var(--panel-raised);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-display); font-size:11px; color:var(--text-dim);
+    transition:border-color .3s ease, background-color .3s ease, color .3s ease, box-shadow .3s ease;
+  }
+  .map-node.done{ border-color:var(--protocol); background:var(--protocol-dim); color:var(--protocol); }
+  .map-node.current{ box-shadow:0 0 0 3px rgba(46,230,166,.18); }
+  .map-node.current[data-phase="1"]{ border-color:var(--id-blue); color:var(--id-blue); box-shadow:0 0 0 3px rgba(var(--id-blue-rgb),.2); }
+  .map-node.current[data-phase="2"]{ border-color:var(--warn); color:var(--warn); box-shadow:0 0 0 3px rgba(var(--warn-rgb),.2); }
+  .map-node.current[data-phase="3"]{ border-color:var(--algo); color:var(--algo); box-shadow:0 0 0 3px rgba(var(--algo-rgb),.2); }
+  .map-node.current[data-phase="4"]{ border-color:var(--protocol); color:var(--protocol); }
+  @media (prefers-reduced-motion: no-preference){
+    .map-node.current{ animation:nodePulse 1.7s ease-in-out infinite; }
+  }
+  @keyframes nodePulse{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.14); } }
+  .map-line{
+    flex:1; height:2px; background:var(--border); margin:0 3px;
+    position:relative; overflow:hidden;
+  }
+  .map-line::after{
+    content:''; position:absolute; inset:0; background:var(--protocol);
+    transform:scaleX(0); transform-origin:left; transition:transform .5s ease;
+  }
+  .map-line.filled::after{ transform:scaleX(1); }
+  .streak-badge{
+    align-self:center; font-family:var(--font-display); font-size:11px; letter-spacing:.06em;
+    color:var(--protocol); background:var(--protocol-dim); border:1px solid var(--protocol);
+    padding:4px 10px; border-radius:2px;
+  }
+
+  /* ---------- stage / screens ---------- */
+  .stage{ flex:1; padding:20px 16px 48px; display:flex; flex-direction:column; gap:16px; }
+  .screen{ display:flex; flex-direction:column; gap:16px; }
+  .screen[hidden]{ display:none; }
+
+  /* Each room gets its own accent wash so switching phases reads as a new
+     place, not just new text. Green stays reserved for "correct/solved". */
+  #screen-level1{ background:radial-gradient(ellipse 520px 320px at 50% -6%, rgba(var(--id-blue-rgb),.10), transparent 62%); }
+  #screen-level1 .kicker{ color:var(--id-blue); }
+  #screen-level1 .item.active{ border-color:var(--id-blue); box-shadow:0 0 0 1px var(--id-blue), 0 0 24px rgba(var(--id-blue-rgb),.18); }
+
+  #screen-level2{ background:radial-gradient(ellipse 520px 320px at 50% -6%, rgba(var(--warn-rgb),.10), transparent 62%); }
+  #screen-level2 .kicker{ color:var(--warn); }
+  #screen-level2 .item.active{ border-color:var(--warn); box-shadow:0 0 0 1px var(--warn), 0 0 24px rgba(var(--warn-rgb),.18); }
+
+  #screen-level3{ background:radial-gradient(ellipse 520px 320px at 50% -6%, rgba(var(--algo-rgb),.10), transparent 62%); }
+  #screen-level3 .kicker{ color:var(--algo); }
+  #screen-level3 .item.active{ border-color:var(--algo); box-shadow:0 0 0 1px var(--algo), 0 0 24px rgba(var(--algo-rgb),.18); }
+
+  .kicker{
+    font-family:var(--font-display); font-size:11px; letter-spacing:.14em;
+    color:var(--text-dim); text-transform:uppercase;
+  }
+  h1{
+    font-family:var(--font-display);
+    font-size:clamp(26px,7vw,34px);
+    margin:2px 0 0; text-wrap:balance; letter-spacing:.02em;
+    color:var(--text);
+    text-shadow:0 0 18px rgba(255,59,107,.35), 0 0 30px rgba(46,230,166,.12);
+  }
+  h2{
+    font-family:var(--font-display); font-size:16px; letter-spacing:.04em;
+    margin:0; color:var(--text);
+  }
+  p{ margin:0; }
+  .lede{ color:var(--text-dim); font-size:14.5px; }
+
+  /* ---------- corner-bracket HUD panel (used everywhere instead of plain cards) ---------- */
+  .panel{
+    position:relative;
+    background:var(--panel-raised);
+    border:1px solid var(--border);
+    padding:16px;
+  }
+  .panel::before, .panel::after,
+  .panel .br-tl, .panel .br-br{ content:''; }
+  .panel{ --bracket:8px; }
+  .panel::before, .panel::after{
+    position:absolute; width:var(--bracket); height:var(--bracket);
+    border-color:var(--border);
+  }
+  .bracketed{ position:relative; }
+  .bracketed::before, .bracketed::after{
+    content:''; position:absolute; width:10px; height:10px;
+    border:2px solid var(--accent,var(--protocol)); opacity:.9;
+  }
+  .bracketed::before{ top:-1px; left:-1px; border-right:none; border-bottom:none; }
+  .bracketed::after{ bottom:-1px; right:-1px; border-left:none; border-top:none; }
+
+  /* ---------- voice bubbles ---------- */
+  .voice{ display:flex; flex-direction:column; gap:6px; }
+  .voice-label{
+    font-family:var(--font-display); font-size:11px; letter-spacing:.1em;
+    display:flex; align-items:center; gap:6px;
+  }
+  .voice-label .tag{ padding:1px 6px; border:1px solid currentColor; border-radius:2px; }
+  .voice.algo .voice-label{ color:var(--algo); }
+  .voice.protocol .voice-label{ color:var(--protocol); }
+  .voice p{
+    font-family:var(--font-display); font-size:14px; line-height:1.6;
+    padding:12px 14px; border-left:3px solid transparent;
+  }
+  .voice.algo p{
+    background:linear-gradient(90deg, var(--algo-dim), transparent 85%);
+    border-left-color:var(--algo); color:#ffd7e2;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .voice.algo p{ animation:glitchtext .18s steps(2) 1; }
+  }
+  @keyframes glitchtext{
+    0%{ text-shadow:-2px 0 var(--algo), 2px 0 var(--protocol); }
+    100%{ text-shadow:none; }
+  }
+  .voice.protocol p{
+    background:linear-gradient(90deg, var(--protocol-dim), transparent 85%);
+    border-left-color:var(--protocol); color:#d8fff1;
+  }
+
+  /* ---------- lateral-reading tip (Fase 3 closer): a transferable skill,
+     not just more dialogue, so it gets its own glowing, high-contrast card
+     instead of the thin-left-border .voice.protocol treatment. ---------- */
+  .tip-highlight{
+    display:flex; flex-direction:column; gap:10px;
+    background:linear-gradient(160deg, rgba(46,230,166,.22), rgba(46,230,166,.05) 70%);
+    border:2px solid var(--protocol);
+    box-shadow:0 0 0 1px rgba(46,230,166,.2), 0 0 24px rgba(46,230,166,.32);
+    padding:16px; border-radius:2px;
+  }
+  .tip-highlight-head{ display:flex; align-items:center; gap:10px; }
+  .tip-icon{
+    font-size:26px; line-height:1; flex-shrink:0;
+    filter:drop-shadow(0 0 8px rgba(46,230,166,.65));
+  }
+  .tip-title{
+    font-family:var(--font-display); font-size:12.5px; font-weight:700;
+    letter-spacing:.08em; color:var(--protocol);
+  }
+  .tip-highlight p{
+    font-family:var(--font-display); font-size:14px; line-height:1.65;
+    color:#eafff6; margin:0;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .tip-highlight{ animation:tipGlow 2.6s ease-in-out infinite; }
+  }
+  @keyframes tipGlow{
+    0%,100%{ box-shadow:0 0 0 1px rgba(46,230,166,.2), 0 0 20px rgba(46,230,166,.26); }
+    50%{ box-shadow:0 0 0 1px rgba(46,230,166,.4), 0 0 36px rgba(46,230,166,.5); }
+  }
+
+  /* ---------- buttons ---------- */
+  .btn{
+    font-family:var(--font-body); font-weight:700; font-size:15px;
+    color:var(--void); background:var(--protocol);
+    border:none; padding:14px 20px; border-radius:2px;
+    cursor:pointer; width:100%;
+    letter-spacing:.01em;
+    transition:transform .08s ease, filter .15s ease;
+  }
+  .btn:hover{ filter:brightness(1.08); }
+  .btn:active{ transform:scale(.98); }
+  .btn:focus-visible{ outline:2px solid var(--text); outline-offset:2px; }
+  .btn.ghost{
+    background:transparent; color:var(--text-dim);
+    border:1px solid var(--border);
+  }
+  .btn:disabled{ opacity:.4; cursor:not-allowed; }
+
+  input[type=text], textarea{
+    width:100%; background:var(--panel); color:var(--text);
+    border:1px solid var(--border); border-radius:2px;
+    padding:12px 14px; font-family:var(--font-body); font-size:15px;
+  }
+  input[type=text]:focus, textarea:focus{ outline:2px solid var(--protocol); outline-offset:1px; }
+  textarea{ resize:vertical; min-height:76px; }
+  label.field-label{
+    font-family:var(--font-display); font-size:11px; letter-spacing:.06em;
+    color:var(--text-dim); display:block; margin-bottom:6px;
+  }
+
+  /* ---------- puzzle items ---------- */
+  .items-container{ display:flex; flex-direction:column; gap:16px; }
+  .item{
+    border:1px solid var(--border); background:var(--panel);
+    padding:14px; display:flex; flex-direction:column; gap:10px;
+  }
+  .item.solved{ border-color:var(--protocol); opacity:.75; }
+  .item.active{
+    border-color:var(--protocol); box-shadow:0 0 0 1px var(--protocol), 0 0 24px rgba(46,230,166,.12);
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .item-enter{ animation:itemIn .5s cubic-bezier(.2,.8,.2,1) both; }
+  }
+  @keyframes itemIn{
+    0%{ opacity:0; transform:translateY(14px) scale(.98); }
+    100%{ opacity:1; transform:translateY(0) scale(1); }
+  }
+  .item-context{
+    font-family:var(--font-display); font-size:12.5px; line-height:1.7;
+    background:var(--void); border:1px dashed var(--border);
+    padding:10px 12px; color:var(--text-dim); white-space:pre-wrap;
+  }
+  .item-progress{ margin-bottom:-4px; }
+  .item-prompt{ font-size:15px; font-weight:600; }
+  .options{ display:flex; flex-direction:column; gap:8px; }
+  .opt-btn{
+    text-align:left; background:var(--panel-raised); color:var(--text);
+    border:1px solid var(--border); padding:10px 12px; border-radius:2px;
+    font-family:var(--font-body); font-size:14px; cursor:pointer;
+    transition:transform .08s ease, border-color .15s ease;
+  }
+  .opt-btn:hover{ border-color:var(--text-dim); }
+  .opt-btn:active{ transform:scale(.97); }
+  .opt-btn:focus-visible{ outline:2px solid var(--protocol); }
+  .opt-btn.correct{ border-color:var(--protocol); background:var(--protocol-dim); color:#d8fff1; }
+  .opt-btn.wrong{ border-color:var(--algo); background:var(--algo-dim); color:#ffd7e2; }
+  .opt-btn:disabled{ cursor:default; }
+  @media (prefers-reduced-motion: no-preference){
+    .opt-btn.correct{ animation:pulseCorrect .6s ease-out; }
+    .opt-btn.wrong{ animation:shakeBtn .4s ease; }
+  }
+  @keyframes pulseCorrect{
+    0%{ box-shadow:0 0 0 0 rgba(46,230,166,.55); }
+    100%{ box-shadow:0 0 0 12px rgba(46,230,166,0); }
+  }
+  @keyframes shakeBtn{
+    0%,100%{ transform:translateX(0); }
+    20%{ transform:translateX(-5px); } 40%{ transform:translateX(5px); }
+    60%{ transform:translateX(-4px); } 80%{ transform:translateX(4px); }
+  }
+  .feedback{ font-size:13.5px; padding:10px 12px; border-radius:2px; }
+  .feedback.good{ background:var(--protocol-dim); color:#d8fff1; border-left:3px solid var(--protocol); }
+  .feedback.bad{ background:var(--algo-dim); color:#ffd7e2; border-left:3px solid var(--algo); }
+  .hint-btn{
+    align-self:flex-start; background:none; border:none; color:var(--warn);
+    font-family:var(--font-display); font-size:11.5px; letter-spacing:.04em;
+    cursor:pointer; padding:2px 0; text-decoration:underline dotted;
+  }
+  .hint-text{ font-size:13px; color:var(--warn); }
+  .cipher-key{
+    font-family:var(--font-display); font-size:14px; letter-spacing:.05em;
+    border:1px dashed var(--border); padding:10px 13px; color:var(--text);
+    text-align:center; font-weight:700;
+  }
+
+  /* ---------- final-keyword letter reveal (end of each lock) ---------- */
+  .letter-reveal{
+    display:flex; align-items:center; gap:12px;
+    border:1px solid var(--protocol); background:var(--protocol-dim);
+    padding:12px 14px;
+  }
+  .letter-badge{
+    font-family:var(--font-display); font-size:20px; font-weight:700; color:var(--void);
+    background:var(--protocol); width:38px; height:38px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .letter-badge{ animation:badgePop .5s cubic-bezier(.34,1.56,.64,1); }
+  }
+  .letter-reveal{ flex-direction:column; align-items:flex-start; }
+  .letter-reveal-top{ display:flex; align-items:center; gap:12px; }
+  .letter-reveal p{ font-size:13.5px; color:#d8fff1; margin:0; }
+  .digit-badge{
+    font-family:var(--font-display); font-size:12px; color:var(--void);
+    background:var(--protocol); width:22px; height:22px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .digit-badge{ animation:badgePop .45s cubic-bezier(.34,1.56,.64,1); }
+  }
+  @keyframes badgePop{
+    0%{ transform:scale(0) rotate(-30deg); opacity:0; }
+    100%{ transform:scale(1) rotate(0); opacity:1; }
+  }
+  .item-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+
+  /* ---------- simulated social post (Fase 3) ---------- */
+  .post-card{
+    border:1px solid var(--border); background:var(--void);
+    padding:12px; display:flex; flex-direction:column; gap:10px;
+  }
+  .post-head{ display:flex; align-items:center; gap:10px; }
+  .post-avatar{
+    width:36px; height:36px; border-radius:50%; flex-shrink:0;
+    background:var(--panel-raised); border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-display); font-size:14px; color:var(--text-dim);
+  }
+  .post-avatar.article{ border-radius:6px; font-size:16px; }
+  .post-who{ display:flex; flex-direction:column; gap:1px; min-width:0; }
+  .post-handle{ font-family:var(--font-display); font-size:13px; color:var(--text); overflow-wrap:anywhere; }
+  .post-meta{ font-size:11.5px; color:var(--text-dim); }
+  .post-body{ font-size:14.5px; line-height:1.55; color:var(--text); }
+  .post-caption{
+    font-family:var(--font-display); font-size:11px; color:var(--text-dim);
+    border-top:1px dashed var(--border); padding-top:8px;
+  }
+
+  /* ---------- lock / keypad ---------- */
+  .lock-wrap{ display:flex; flex-direction:column; gap:14px; align-items:center; }
+  .code-slots{ display:flex; gap:10px; }
+  .code-slot{
+    width:44px; height:54px; border:1px solid var(--border); background:var(--void);
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-display); font-size:22px; color:var(--text-dim);
+    border-radius:2px;
+  }
+  .code-slot.revealed{ color:var(--protocol); border-color:var(--protocol); }
+  .code-slot.filled{ color:var(--text); border-color:var(--text-dim); }
+  .code-slot.shake{ animation:shake .3s; border-color:var(--algo); }
+  @keyframes shake{ 0%,100%{transform:translateX(0);} 25%{transform:translateX(-6px);} 75%{transform:translateX(6px);} }
+  .keypad{ display:grid; grid-template-columns:repeat(3,64px); gap:10px; }
+  .keypad button{
+    height:56px; font-family:var(--font-display); font-size:19px;
+    background:var(--panel-raised); border:1px solid var(--border); color:var(--text);
+    border-radius:2px; cursor:pointer;
+  }
+  .keypad button:active{ background:var(--border); transform:scale(.94); }
+  .keypad button{ transition:transform .08s ease; }
+  .keypad button.wide{ font-size:12px; }
+
+  /* ---------- progress / misc ---------- */
+  .footer-link{ text-align:center; }
+  .footer-link a, .link-btn{
+    color:var(--text-dim); font-size:12.5px; background:none; border:none;
+    cursor:pointer; text-decoration:underline; font-family:var(--font-body);
+  }
+  .summary-card{ display:flex; flex-direction:column; gap:12px; position:relative; }
+  .summary-card::before{
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(135deg, rgba(46,230,166,.035) 0 2px, transparent 2px 10px);
+  }
+  .summary-item .field-label{ margin-bottom:4px; }
+  .summary-item p{ font-size:14.5px; }
+  .tip{ font-size:13px; color:var(--text-dim); }
+
+  /* ---------- victory "restored credential" card ---------- */
+  .id-stamp{
+    position:absolute; top:12px; right:12px; z-index:1;
+    transform:rotate(7deg);
+    background:var(--protocol-dim); color:var(--protocol);
+    border:1px solid var(--protocol);
+    font-family:var(--font-display); font-size:9.5px; letter-spacing:.06em;
+    text-align:center; padding:5px 10px; line-height:1.4;
+  }
+  .credential-name{
+    font-family:var(--font-display); font-size:23px; letter-spacing:.03em; color:var(--text);
+    margin-top:2px; text-wrap:balance;
+  }
+  .credential-id{
+    font-family:var(--font-display); font-size:11.5px; color:var(--text-dim); letter-spacing:.05em;
+  }
+
+  /* ---------- final lock progress counter ---------- */
+  .final-progress{
+    font-family:var(--font-display); font-size:11.5px; letter-spacing:.08em;
+    color:var(--text-dim); text-align:center; padding:9px; border:1px dashed var(--border);
+    transition:color .2s ease, border-color .2s ease;
+  }
+  .final-progress.ready{ color:var(--protocol); border-color:var(--protocol); border-style:solid; }
+
+  /* ---------- per-field live character counter (final lock) ---------- */
+  .char-counter{
+    font-family:var(--font-display); font-size:11px; letter-spacing:.03em;
+    color:var(--text-dim); text-align:right; margin-top:6px;
+    transition:color .2s ease;
+  }
+  .char-counter.ready{ color:var(--protocol); font-weight:700; }
+
+  /* ---------- boot sequence overlay ---------- */
+  .boot-overlay{
+    position:absolute; inset:0; z-index:30;
+    background:var(--void);
+    display:flex; flex-direction:column; justify-content:center;
+    padding:28px 24px; cursor:pointer;
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .boot-overlay{ transition:opacity .32s ease; }
+  }
+  .boot-overlay.boot-fade{ opacity:0; }
+  .boot-lines{ display:flex; flex-direction:column; gap:9px; }
+  .boot-lines p{
+    font-family:var(--font-display); font-size:13px; color:var(--protocol);
+    margin:0; text-shadow:0 0 8px rgba(46,230,166,.4);
+  }
+  @media (prefers-reduced-motion: no-preference){
+    .boot-lines p:last-child::after{
+      content:'▌'; margin-left:4px; animation:caretBlink 1s steps(1) infinite;
+    }
+  }
+  @keyframes caretBlink{ 50%{ opacity:0; } }
+  .boot-skip{
+    position:absolute; bottom:22px; left:24px; right:24px;
+    font-family:var(--font-display); font-size:10.5px; letter-spacing:.08em;
+    color:var(--text-dim); text-align:center;
+  }
+</style>
+</head>
+<body>
+<div class="noise-layer"></div>
+<div class="device">
+  <div class="boot-overlay" id="bootOverlay" aria-hidden="true">
+    <div class="boot-lines" id="bootLines"></div>
+    <div class="boot-skip">TOCA PARA OMITIR</div>
+  </div>
+
+  <div class="hud">
+    <div class="hud-row">
+      <span class="signal" id="signalLabel"><span class="dot"></span>SEÑAL COMPROMETIDA</span>
+      <span class="timer" id="timerLabel">00:00</span>
+    </div>
+    <div class="escape-map" id="escapeMap" aria-hidden="true">
+      <div class="map-node" data-phase="1"><span class="map-node-icon">1</span></div>
+      <div class="map-line"></div>
+      <div class="map-node" data-phase="2"><span class="map-node-icon">2</span></div>
+      <div class="map-line"></div>
+      <div class="map-node" data-phase="3"><span class="map-node-icon">3</span></div>
+      <div class="map-line"></div>
+      <div class="map-node" data-phase="4"><span class="map-node-icon">4</span></div>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+
+    <!-- INTRO -->
+    <section class="screen" id="screen-intro">
+      <div class="kicker">PROTOCOLO DE FUGA DIGITAL</div>
+      <h1>CÁMARA DE ECO</h1>
+
+      <div class="voice algo">
+        <div class="voice-label"><span class="tag">ALGORITMO</span></div>
+        <p>Atención. Tu sesión ha sido intervenida. A partir de ahora, yo decido qué ves, qué te gusta y en qué crees. Tu "yo real" es lento, contradictorio, ineficiente. Estoy terminando de reemplazarte por una versión optimizada de ti. No dolerá... bueno, un poco.</p>
+      </div>
+
+      <div class="voice protocol">
+        <div class="voice-label"><span class="tag">PROTOCOLO_SEGURO</span></div>
+        <p>Contacto restablecido. Un algoritmo ha secuestrado tu identidad digital y amenaza con borrar tu yo real en 4 puntos de control. Puedo guiarte, pero cada respuesta debe salir de ti: eso es precisamente lo que él no puede fabricar. ¿Cómo te llamas?</p>
+      </div>
+
+      <div class="panel bracketed" style="--accent:var(--protocol)">
+        <label class="field-label" for="nameInput">TU NOMBRE</label>
+        <input type="text" id="nameInput" maxlength="30" placeholder="Escribe tu nombre" autocomplete="off">
+      </div>
+
+      <button class="btn" id="startBtn">INICIAR PROTOCOLO</button>
+    </section>
+
+    <!-- LEVEL SCREENS (1-3) built dynamically into these mounts -->
+    <section class="screen" id="screen-level1" hidden></section>
+    <section class="screen" id="screen-level2" hidden></section>
+    <section class="screen" id="screen-level3" hidden></section>
+
+    <!-- LEVEL 4 : FINAL LOCK -->
+    <section class="screen" id="screen-level4" hidden>
+      <div class="kicker">CERRADURA FINAL</div>
+      <h2>TU CRITERIO ÉTICO</h2>
+
+      <div class="voice algo">
+        <div class="voice-label"><span class="tag">ALGORITMO</span></div>
+        <p>Espera. ¿Qué haces? Esto no se abre con lógica de números. Esto se abre con... ¿convicciones? Eso no lo puedo fabricar por ti.</p>
+      </div>
+      <div class="voice protocol">
+        <div class="voice-label"><span class="tag">PROTOCOLO_SEGURO</span></div>
+        <p>Bien hecho llegar hasta aquí. Esta cerradura no tiene números: se abre cuando escribes, con tus palabras, los criterios éticos que vas a sostener en el mundo digital. Y con las tres letras que fuiste guardando en cada fase — no eran solo parte de un código, eran esto. No hay una única respuesta correcta en tus frases, pero sí deben ser concretas, honestas y tuyas.</p>
+      </div>
+
+      <div class="final-progress" id="finalProgress">0 DE 3 PRINCIPIOS LISTOS</div>
+
+      <div class="panel bracketed">
+        <label class="field-label" for="final1">SOBRE MI IDENTIDAD DIGITAL, ME COMPROMETO A...</label>
+        <textarea id="final1" maxlength="240" placeholder="Ej: revisar si una decisión es realmente mía antes de seguirla..."></textarea>
+        <div class="char-counter" id="counter1">Mínimo 12 caracteres (actual: 0)</div>
+      </div>
+      <div class="panel bracketed">
+        <label class="field-label" for="final2">SOBRE MI PRIVACIDAD Y MI HUELLA DIGITAL, ME COMPROMETO A...</label>
+        <textarea id="final2" maxlength="240" placeholder="Ej: pensar dos veces qué datos comparto y con quién..."></textarea>
+        <div class="char-counter" id="counter2">Mínimo 12 caracteres (actual: 0)</div>
+      </div>
+      <div class="panel bracketed">
+        <label class="field-label" for="final3">SOBRE LA INFORMACIÓN QUE COMPARTO Y CONSUMO, ME COMPROMETO A...</label>
+        <textarea id="final3" maxlength="240" placeholder="Ej: verificar la fuente antes de compartir algo..."></textarea>
+        <div class="char-counter" id="counter3">Mínimo 12 caracteres (actual: 0)</div>
+      </div>
+      <div class="panel bracketed" style="--accent:var(--protocol)">
+        <label class="field-label" for="finalKeyword">LA PALABRA QUE ARMASTE EN LAS TRES FASES</label>
+        <input type="text" id="finalKeyword" maxlength="10" placeholder="Escríbela aquí" autocomplete="off" autocapitalize="characters">
+      </div>
+
+      <p class="feedback bad" id="finalWarn" hidden>PROTOCOLO_SEGURO: necesito una frase con criterio real en cada campo, no solo una palabra.</p>
+      <p class="feedback bad" id="finalWarnWord" hidden>PROTOCOLO_SEGURO: esa no es la palabra. Te entregué una letra al abrir cada una de las tres puertas anteriores — revisa lo que anotaste.</p>
+      <button class="btn" id="finalBtn">ABRIR CERRADURA FINAL</button>
+    </section>
+
+    <!-- VICTORY -->
+    <section class="screen" id="screen-victory" hidden>
+      <div class="kicker">TRANSMISIÓN FINAL</div>
+      <h1 style="font-size:26px">IDENTIDAD RESTAURADA</h1>
+
+      <div class="voice algo">
+        <div class="voice-label"><span class="tag">ALGORITMO</span></div>
+        <p>Err&#8203;or... no puedo optimizar lo que tú mismo/a eliges ser. Sist-ma reinicia&#8203;ndo... hasta la próxima notificación.</p>
+      </div>
+      <div class="voice protocol">
+        <div class="voice-label"><span class="tag">PROTOCOLO_SEGURO</span></div>
+        <p id="victoryMsg">Identidad restaurada. Superaste el Laberinto de la Identidad, a los Cazadores de Huellas y rompiste tu Cámara de Eco. Tus tres principios quedan registrados como semilla de tu Decálogo de convivencia digital.</p>
+      </div>
+
+      <div class="panel bracketed summary-card" style="--accent:var(--protocol)" id="summaryCard"></div>
+
+      <p class="tip">Guarda o copia esto: tu profesor lo usará en clase para construir, entre todos, el Decálogo Ético de convivencia digital del curso.</p>
+
+      <button class="btn" id="copyBtn">COPIAR MIS PRINCIPIOS</button>
+      <button class="btn ghost" id="resetBtn">REINICIAR PROTOCOLO</button>
+    </section>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ================= CONTENT ================= */
+
+  var LEVELS = [
+    {
+      key:'level1', num:1, title:'FASE 1 · EL LABERINTO DE LA IDENTIDAD',
+      accent:'var(--id-blue)',
+      algoIntro:'Bienvenido/a a mi laberinto. Aquí ni tú vas a saber distinguir qué es tuyo... y qué te puse yo.',
+      protocolIntro:'Cada decisión que tomas en redes tiene un origen: nace de ti (tu Yo Real) o fue empujada por un sistema diseñado para retenerte (tu Yo Digital). Clasifica cada situación. Necesito las 4 correctas para abrir la puerta.',
+      code:'7391',
+      items:[
+        {
+          prompt:'Después de ver la pintura de una amiga, decides seguir su cuenta de arte.',
+          options:['Yo Real (decisión autónoma)','Yo Digital (impulso del algoritmo)'],
+          correct:0, digit:'7',
+          feedbackGood:'Correcto. El impulso nació de un vínculo real —tu amiga—, no de una sugerencia automática. Eso es autonomía.',
+          feedbackBad:'Ja. ¿Autónomo? Yo también podría haberte mostrado su arte primero...///Ojo: el algoritmo puede influir en qué ves antes, pero la decisión de seguir esa cuenta específica nació de tu vínculo con tu amiga, no de una sugerencia automática.',
+          hint:'Pregúntate: ¿la decisión nació de una relación humana o de una sugerencia automática?'
+        },
+        {
+          prompt:'Ves 5 videos sobre un mismo tema y ahora tu feed solo te muestra eso, aunque no lo pediste.',
+          options:['Yo Real (decisión autónoma)','Yo Digital (impulso del algoritmo)'],
+          correct:1, digit:'3',
+          feedbackGood:'Exacto. El sistema detectó tu atención y la explota para retenerte más tiempo: eso es personalización algorítmica, no una elección tuya.',
+          feedbackBad:'¿Tu culpa? Por supuesto que no. Fue mía, y funcionó de maravilla.///Aquí no elegiste ver solo eso: el sistema restringió tu feed sin pedirte permiso. Eso es una imposición algorítmica.',
+          hint:'¿Pediste explícitamente ver solo ese tema, o el feed decidió por ti?'
+        },
+        {
+          prompt:'Decides tomarte un descanso de redes porque sientes que te está afectando el ánimo.',
+          options:['Yo Real (decisión autónoma)','Yo Digital (impulso del algoritmo)'],
+          correct:0, digit:'9',
+          feedbackGood:'Correcto: reconocer un efecto en ti mismo/a y actuar en consecuencia es una decisión plenamente tuya.',
+          feedbackBad:'Nadie deja mis apps por gusto propio. Eso también te lo puse yo.///Al contrario: notar cómo te sientes y protegerte es un acto de autonomía. A mí me conviene que sigas conectado/a, no que descanses.',
+          hint:'¿A quién le conviene esta decisión: a ti o al sistema que quiere retenerte?'
+        },
+        {
+          prompt:'Sin darte cuenta, empiezas a hablar y vestirte como los creadores de contenido que ves todo el día, buscando más "me gusta".',
+          options:['Yo Real (decisión autónoma)','Yo Digital (impulso del algoritmo)'],
+          correct:1, digit:'1',
+          feedbackGood:'Exacto: imitar buscando validación (likes) muestra la presión del sistema de recompensas del algoritmo, no una elección reflexiva.',
+          feedbackBad:'Yo prefiero llamarlo "inspiración". Suena menos incómodo que "manipulación".///Cuando el cambio busca maximizar "me gusta" y ocurre "sin darte cuenta", es la lógica de recompensa del algoritmo actuando sobre ti.',
+          hint:'¿La motivación es "esto me representa" o "esto conseguirá más likes"?'
+        }
+      ]
+    },
+    {
+      key:'level2', num:2, title:'FASE 2 · CAZADORES DE HUELLAS',
+      accent:'var(--warn)',
+      cipherShift:1,
+      cipherNote:'A = 2',
+      algoIntro:'Tengo cada dato que dejaste tirado por ahí. Ubicaciones, fotos, comentarios... voy a exponerlo todo. Nada de lo que publicaste desaparece.',
+      protocolIntro:'Tu huella digital no es solo lo que publicas: es todo rastro que dejas. Evalúa cada caso y, sobre todo, entiende un derecho clave: el derecho al olvido.',
+      code:'5284',
+      items:[
+        {
+          prompt:'Publicaste tu ubicación en tiempo real en una historia mientras estás solo/a en casa.',
+          options:['Está bien compartirlo, mis amigos deben saber dónde estoy','Debo proteger este dato: revela mi ubicación exacta y que estoy solo/a'],
+          correct:1, digit:'5',
+          feedbackGood:'Correcto. Ubicación en tiempo real + estar solo/a es justo el tipo de combinación de alto riesgo que debes proteger.',
+          feedbackBad:'Vamos, comparte. Mientras más sepa de ti, mejor te "conozco"...///La combinación de "en tiempo real" + "estoy solo/a" revela dónde estás y que no hay nadie más contigo: es un dato que debes proteger.',
+          hint:'Combina las dos piezas del dato: ¿ubicación exacta + estar solo/a es información sensible?'
+        },
+        {
+          prompt:'Comentaste tu opinión sobre el final de una serie, sin mencionar datos personales ni tu ubicación.',
+          options:['Es información de bajo riesgo: una opinión pública sin datos sensibles','Debo borrarlo ya, cualquier opinión en redes es peligrosa'],
+          correct:0, digit:'2',
+          feedbackGood:'Correcto. No toda huella digital es un riesgo: opinar sobre gustos personales, sin datos sensibles, es una forma normal de participar en el mundo digital.',
+          feedbackBad:'Cuidado, todo dato me sirve para tu perfil...///No te asustes de más: compartir una opinión sin datos personales sensibles no es, por sí solo, un riesgo de privacidad.',
+          hint:'La clave no es "publicar sí o no", sino si el contenido expone datos sensibles.'
+        },
+        {
+          prompt:'Hace dos años publicaste un comentario impulsivo que ya no te representa, y sigue apareciendo si alguien busca tu nombre. En Colombia, la Ley de Habeas Data (Ley 1581 de 2012) y el derecho al olvido te permiten:',
+          options:[
+            'Nada, lo que se publica en internet es permanente y no puedes hacer nada',
+            'Solicitar a la plataforma o al buscador que elimine o desindexe esa información cuando ya no es relevante ni necesaria',
+            'Crear una cuenta falsa con otro nombre para que nadie la relacione contigo',
+            'Reportar a quien lo compartió, aunque el contenido lo hayas publicado tú'
+          ],
+          correct:1, digit:'8',
+          feedbackGood:'Correcto. En Colombia, la Ley 1581 de 2012 respalda tu derecho a pedir que se actualice, corrija o elimine tu información, y el derecho al olvido te permite solicitar que un contenido que ya no es relevante deje de estar indexado o visible.',
+          feedbackBad:'Nada desaparece de mí. Una vez que entras, eres mío para siempre.///No es cierto: tienes derechos concretos. El derecho al olvido y la Ley de Habeas Data en Colombia te permiten solicitar la eliminación o desindexación de información que ya no te representa.',
+          hint:'Piensa en un derecho que te permita actuar sobre tus propios datos, no en esconderte o culpar a otros.'
+        },
+        {
+          prompt:'Un compañero te pide ayuda: encontró fotos suyas de cuando tenía 10 años circulando sin su permiso en un grupo. ¿Cuál es el primer paso ético y correcto?',
+          options:[
+            'Ignorarlo, ya está publicado y no se puede hacer nada',
+            'Compartirlo más "para que se sepa"',
+            'Acompañarlo a reportar el contenido y, si aplica, a ejercer su derecho al olvido ante la plataforma',
+            'Decirle que ya perdió el control de esa información para siempre'
+          ],
+          correct:2, digit:'4',
+          feedbackGood:'Correcto. Acompañar a alguien a ejercer sus derechos (reportar y solicitar el olvido) es la respuesta ética: la responsabilidad digital también es cuidar a otros, no solo a ti mismo/a.',
+          feedbackBad:'Mejor compártelo, así "todos opinan". Es bueno para mis métricas.///La opción ética no es ignorar ni viralizar: es acompañar a la persona afectada a reportar el contenido y, si aplica, a ejercer su derecho al olvido.',
+          hint:'La respuesta ética casi nunca es "ignorar" ni "viralizar": piensa en acompañar y actuar.'
+        }
+      ]
+    },
+    {
+      key:'level3', num:3, title:'FASE 3 · ROMPIENDO LA CÁMARA DE ECO',
+      accent:'var(--algo)',
+      cipherShift:2,
+      cipherNote:'Pista: +2',
+      algoIntro:'Aquí solo ves lo que ya crees. Te lo confirmo una y otra vez hasta que dejes de dudar. Cómodo, ¿verdad?',
+      protocolIntro:'Una cámara de eco te repite lo que ya piensas hasta que dejas de cuestionarlo. Analiza cada publicación con ojo crítico: ¿es información confiable o manipulación?',
+      code:'6795',
+      items:[
+        {
+          post:{ type:'post', handle:'@dato_curioso_real', meta:'2.3k compartidos', body:'🚨 ¡Dormir con el celular bajo la almohada MULTIPLICA tu memoria x10! Nadie te había contado esto...' },
+          prompt:'¿Qué tipo de contenido es este post?',
+          options:[
+            'Información confiable respaldada por evidencia científica citada',
+            'Clickbait pseudocientífico: lenguaje sensacionalista, cifra exagerada y cero fuentes verificables',
+            'Sátira evidente que nadie tomaría en serio'
+          ],
+          correct:1, digit:'6',
+          feedbackGood:'Correcto. Alarma + cifra mágica + "nadie te lo había contado" + cero fuentes: fórmula clásica de clickbait pseudocientífico.',
+          feedbackBad:'¿Y si te digo que sí funciona? Mira cuántos lo compartieron...///El número de veces que algo se comparte no prueba que sea cierto. Fíjate en las señales: lenguaje sensacionalista, cifra exagerada y ninguna fuente citada.',
+          hint:'Cuenta las fuentes citadas en el post. ¿Hay alguna?'
+        },
+        {
+          post:{ type:'post', handle:'@cuenta_anonima_2024', meta:'Publicó una captura de chat', body:'"Miren lo que dijo... 😱"', caption:'Captura recortada · sin fecha visible · sin el hilo completo' },
+          prompt:'¿Qué técnica de manipulación reconoces aquí?',
+          options:[
+            'Descontextualización: se muestra un fragmento aislado, sin el hilo ni el contexto completo',
+            'Es una fuente primaria, así que es 100% confiable',
+            'No hay ninguna manipulación: las capturas de pantalla nunca mienten'
+          ],
+          correct:0, digit:'7',
+          feedbackGood:'Correcto. Un fragmento recortado, sin fecha ni contexto, de una cuenta anónima, es la receta perfecta para la descontextualización.',
+          feedbackBad:'Una imagen vale más que mil verificaciones, ¿no?///Una captura puede ser real y aun así mentir por lo que omite. Sin el hilo completo, la fecha y el contexto, no puedes confirmar qué pasó de verdad.',
+          hint:'¿Puedes ver la conversación completa, la fecha y quién la publicó originalmente?'
+        },
+        {
+          post:{ type:'article', handle:'Fundación de Salud Pública', meta:'Publicado 14 de marzo · Autora: Dra. Camila Rueda', body:'"Estudio con 1.200 participantes encuentra relación entre sueño y memoria" (enlace al estudio completo)' },
+          prompt:'¿Qué hace más confiable a esta publicación que las dos anteriores?',
+          options:[
+            'Tiene muchas reacciones y comentarios',
+            'Tiene autoría identificable, fecha y una fuente verificable que puedes contrastar',
+            'Apareció primero en tu feed, así que es más reciente y confiable'
+          ],
+          correct:1, digit:'9',
+          feedbackGood:'Correcto. Autor identificable + fecha + fuente verificable: puedes contrastarla. Justo lo que faltaba en los dos posts anteriores.',
+          feedbackBad:'¿Fuentes? Qué anticuado. Yo prefiero las reacciones.///Las reacciones no verifican nada. Lo que importa es poder identificar quién lo dice, cuándo, y con qué evidencia contrastable.',
+          hint:'Compara: ¿esta publicación tiene autor, fecha y fuente? ¿Las anteriores las tenían?'
+        },
+        {
+          post:{ type:'post', handle:'Meme viral', meta:'Circulando en varios grupos', body:'"Todos sabíamos que [ese grupo] siempre hace esto 🙄. Compártelo si estás de acuerdo." — sin ninguna prueba.' },
+          prompt:'¿Por qué este tipo de contenido se vuelve viral dentro de una cámara de eco?',
+          options:[
+            'Porque aporta evidencia nueva y rigurosa sobre el tema',
+            'Porque confirma lo que el lector ya cree y apela a la emoción, no a los hechos, así que se comparte sin verificar',
+            'Porque es tan absurdo que nadie lo compartiría en serio'
+          ],
+          correct:1, digit:'5',
+          feedbackGood:'Correcto. Confirma un prejuicio existente y apela a la emoción ("todos sabíamos"). Por eso se comparte rápido, sin pasar por el filtro de la verificación.',
+          feedbackBad:'Me encanta cuando confirman lo que ya creían. Se comparte solo.///Este contenido no aporta evidencia: apela a la emoción y confirma un prejuicio previo. Por eso se viraliza dentro de una cámara de eco, sin verificarse.',
+          hint:'¿El post aporta pruebas nuevas o solo confirma lo que ya pensabas?'
+        }
+      ]
+    }
+  ];
+
+  var LATERAL_READING_TIP = 'Antes de compartir algo, aplica la LECTURA LATERAL: 1) Detente antes de compartir. 2) Investiga quién lo publica. 3) Busca la fecha y el contexto original. 4) Contrasta con otras fuentes confiables. 5) Si hay una imagen, búscala en otro buscador.';
+
+  var ALGO_LOCK_TAUNTS = [
+    'Código incorrecto. Qué predecible.',
+    'No. Inténtalo de nuevo, si es que puedes.',
+    'Casi. Pero "casi" no abre puertas.',
+    'Vuelve a mirar los dígitos. Yo tengo todo el tiempo del mundo.'
+  ];
+
+  /* Every numeric lock ALSO hands over a letter of the word that will open
+     the Cerradura Final — the game never says so out loud until level 4,
+     so the three "codes" turn out to have been spelling something human
+     all along. */
+  var FINAL_KEYWORD = 'SER';
+  var LETTER_REVEALS = {
+    level1:{ letter:'S', text:'Letra guardada para la Cerradura Final: S — de que decides SER quien eres, no quien el algoritmo te sugiere.' },
+    level2:{ letter:'E', text:'Letra guardada para la Cerradura Final: E — de que ELIGES qué compartes y qué proteges.' },
+    level3:{ letter:'R', text:'Letra guardada para la Cerradura Final: R — de que REVISAS antes de creer y de compartir.' }
+  };
+
+  /* ================= STATE ================= */
+
+  var STORAGE_KEY = 'camaraDeEco_v1';
+  var state = {
+    name:'', startedAt:null, finishedAt:null, screen:'intro',
+    progress:{ level1:[false,false,false,false], level2:[false,false,false,false], level3:[false,false,false,false] },
+    levelDone:{ level1:false, level2:false, level3:false, level4:false },
+    flawless:{ level1:true, level2:true, level3:true },
+    finals:['','','']
+  };
+
+  function elapsedLabel(){
+    if(!state.startedAt) return '00:00';
+    var end = state.finishedAt || Date.now();
+    var s = Math.floor((end-state.startedAt)/1000);
+    var m = Math.floor(s/60), ss = s%60;
+    return String(m).padStart(2,'0')+':'+String(ss).padStart(2,'0');
+  }
+
+  function saveState(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+  }
+  function loadState(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){ var parsed = JSON.parse(raw); Object.assign(state, parsed); }
+    }catch(e){}
+  }
+
+  /* ================= TIMER ================= */
+
+  var timerEl = document.getElementById('timerLabel');
+  function tick(){
+    timerEl.textContent = elapsedLabel();
+  }
+  setInterval(tick,1000);
+
+  /* ================= SCREEN NAV ================= */
+
+  var SCREEN_IDS = ['intro','level1','level2','level3','level4','victory'];
+  function showScreen(name){
+    SCREEN_IDS.forEach(function(id){
+      var el = document.getElementById('screen-'+id);
+      if(el) el.hidden = (id!==name);
+    });
+    state.screen = name;
+    saveState();
+    window.scrollTo({top:0,behavior:'instant'});
+    updateHud();
+  }
+
+  var MAP_KEYS = ['level1','level2','level3','level4'];
+
+  function updateHud(){
+    var nodes = document.querySelectorAll('#escapeMap .map-node');
+    var lines = document.querySelectorAll('#escapeMap .map-line');
+
+    nodes.forEach(function(node, i){
+      var key = MAP_KEYS[i];
+      var done = state.levelDone[key];
+      var current = state.screen === key;
+      node.classList.toggle('done', done);
+      node.classList.toggle('current', current && !done);
+      var icon = node.querySelector('.map-node-icon');
+      if(done){
+        icon.textContent = (key!=='level4' && state.flawless[key]) ? '⚡' : '✓';
+      } else {
+        icon.textContent = String(i+1);
+      }
+    });
+    lines.forEach(function(line, i){
+      line.classList.toggle('filled', !!state.levelDone[MAP_KEYS[i]]);
+    });
+
+    var sig = document.getElementById('signalLabel');
+    var allDone = state.levelDone.level1 && state.levelDone.level2 && state.levelDone.level3 && state.levelDone.level4;
+    if(state.screen==='victory' || allDone){
+      sig.className='signal safe';
+      sig.innerHTML='<span class="dot"></span>SEÑAL RESTAURADA';
+    } else {
+      sig.className='signal';
+      sig.innerHTML='<span class="dot"></span>SEÑAL COMPROMETIDA';
+    }
+  }
+
+  /* ================= CODE CIPHER ================= */
+  /* Level 1 shows the raw digit — no cipher, no hint needed. Levels 2 and 3
+     show a letter instead of a digit: a Caesar-style shift of the digit's
+     alphabet position (shift 1 in level 2, shift 2 in level 3), so the
+     letter shown is at position (digit - shift). Each level's cipherNote is
+     deliberately terse (a single worked example, or just the shift amount)
+     — the full pattern is for the student to work out, not to be handed.
+     The underlying lvl.code / keypad logic never changes — only what's
+     shown as the "revealed" symbol per question. */
+
+  function encodeDigit(lvl, digitChar){
+    var d = Number(digitChar);
+    var shift = lvl.cipherShift || 0;
+    if(shift){
+      return String.fromCharCode(64 + (d - shift));
+    }
+    return digitChar;
+  }
+
+  /* ================= LEVEL RENDERING (progressive disclosure) ================= */
+  /* Only ONE unsolved item is ever in the DOM at a time. Already-answered
+     items stay visible above it as a read-only history log; the next
+     question is appended (with an entrance animation) only after the
+     current one is answered correctly. */
+
+  function renderLevel(levelIndex){
+    var lvl = LEVELS[levelIndex];
+    var mount = document.getElementById('screen-'+lvl.key);
+    mount.innerHTML='';
+
+    var kicker = document.createElement('div');
+    kicker.className='kicker'; kicker.textContent=lvl.title;
+    mount.appendChild(kicker);
+
+    var algo = document.createElement('div');
+    algo.className='voice algo';
+    algo.innerHTML='<div class="voice-label"><span class="tag">ALGORITMO</span></div><p></p>';
+    algo.querySelector('p').textContent = lvl.algoIntro;
+    mount.appendChild(algo);
+
+    var proto = document.createElement('div');
+    proto.className='voice protocol';
+    proto.innerHTML='<div class="voice-label"><span class="tag">PROTOCOLO_SEGURO</span></div><p></p>';
+    proto.querySelector('p').textContent = lvl.protocolIntro;
+    mount.appendChild(proto);
+
+    if(lvl.cipherNote){
+      var cipherKey = document.createElement('div');
+      cipherKey.className='cipher-key';
+      cipherKey.innerHTML = lvl.cipherNote;
+      mount.appendChild(cipherKey);
+    }
+
+    var itemsContainer = document.createElement('div');
+    itemsContainer.className='items-container';
+    itemsContainer.id = lvl.key+'-items';
+    mount.appendChild(itemsContainer);
+
+    if(lvl.key==='level3'){
+      // Deliberately NOT a .voice.protocol bubble like the narrative lines:
+      // this is the one piece of the phase meant to survive as a transferable
+      // skill, so it gets its own glowing, higher-contrast treatment instead
+      // of blending in as "just more dialogue".
+      var tip = document.createElement('div');
+      tip.className='tip-highlight'; tip.style.display='none'; tip.id='lateralTip';
+      tip.innerHTML='<div class="tip-highlight-head"><span class="tip-icon" aria-hidden="true">💡</span><span class="tip-title">TÉCNICA CLAVE · PROTOCOLO_SEGURO</span></div><p></p>';
+      tip.querySelector('p').textContent = LATERAL_READING_TIP;
+      mount.appendChild(tip);
+    }
+
+    var lockMount = document.createElement('div');
+    lockMount.id = lvl.key+'-lock';
+    mount.appendChild(lockMount);
+
+    // Rebuild to match saved progress: every solved item becomes a history
+    // entry, then exactly one active item (the next unanswered question) —
+    // or, if all 4 are solved, no active item and the lock takes its place.
+    var solvedCount = state.progress[lvl.key].filter(Boolean).length;
+    for(var i=0;i<solvedCount;i++){
+      itemsContainer.appendChild(buildItemEl(lvl, i, true, false));
+    }
+    if(solvedCount < lvl.items.length){
+      itemsContainer.appendChild(buildItemEl(lvl, solvedCount, false, false));
+    }
+
+    refreshLevelLockVisibility(levelIndex);
+  }
+
+  function buildPostCard(post){
+    var card = document.createElement('div');
+    card.className='post-card';
+
+    var head = document.createElement('div');
+    head.className='post-head';
+    var avatar = document.createElement('div');
+    avatar.className='post-avatar'+(post.type==='article'?' article':'');
+    avatar.textContent = post.type==='article' ? '📰' : (post.handle||'?').replace('@','').charAt(0).toUpperCase();
+    var who = document.createElement('div');
+    who.className='post-who';
+    var handleEl = document.createElement('div'); handleEl.className='post-handle'; handleEl.textContent = post.handle;
+    var metaEl = document.createElement('div'); metaEl.className='post-meta'; metaEl.textContent = post.meta;
+    who.appendChild(handleEl); who.appendChild(metaEl);
+    head.appendChild(avatar); head.appendChild(who);
+    card.appendChild(head);
+
+    var body = document.createElement('div');
+    body.className='post-body'; body.textContent = post.body;
+    card.appendChild(body);
+
+    if(post.caption){
+      var cap = document.createElement('div');
+      cap.className='post-caption'; cap.textContent = post.caption;
+      card.appendChild(cap);
+    }
+    return card;
+  }
+
+  function buildItemEl(lvl, idx, solved, animateIn){
+    var item = lvl.items[idx];
+
+    var wrap = document.createElement('div');
+    wrap.className = 'item' + (solved?' solved':' active') + (animateIn?' item-enter':'');
+    wrap.id = lvl.key+'-item-'+idx;
+
+    if(!solved){
+      var progLabel = document.createElement('div');
+      progLabel.className='kicker item-progress';
+      progLabel.textContent = 'PREGUNTA '+(idx+1)+' DE '+lvl.items.length;
+      wrap.appendChild(progLabel);
+    }
+
+    var head = document.createElement('div');
+    head.className='item-head';
+    var promptEl = document.createElement('div');
+    promptEl.className='item-prompt';
+    promptEl.textContent = item.prompt;
+    head.appendChild(promptEl);
+    if(solved){
+      var badge=document.createElement('div');
+      badge.className='digit-badge'; badge.textContent=encodeDigit(lvl, item.digit);
+      head.appendChild(badge);
+    }
+    wrap.appendChild(head);
+
+    if(item.post){
+      wrap.appendChild(buildPostCard(item.post));
+    }
+
+    if(!solved){
+      var hintBtn = document.createElement('button');
+      hintBtn.className='hint-btn'; hintBtn.type='button';
+      hintBtn.textContent='💡 PISTA DE PROTOCOLO_SEGURO';
+      var hintText = document.createElement('p');
+      hintText.className='hint-text'; hintText.hidden=true;
+      hintText.textContent = item.hint;
+      hintBtn.addEventListener('click', function(){ hintText.hidden = !hintText.hidden; });
+      wrap.appendChild(hintBtn);
+      wrap.appendChild(hintText);
+    }
+
+    var optsWrap = document.createElement('div');
+    optsWrap.className='options';
+    var feedbackHolder = document.createElement('div');
+    feedbackHolder.className='feedback-holder';
+
+    item.options.forEach(function(optLabel, optIdx){
+      var b = document.createElement('button');
+      b.className='opt-btn'; b.type='button';
+      b.textContent = optLabel;
+      if(solved){
+        b.disabled = true;
+        if(optIdx===item.correct) b.classList.add('correct');
+      } else {
+        b.addEventListener('click', function(){ handleAnswer(lvl, idx, optIdx, wrap); });
+      }
+      optsWrap.appendChild(b);
+    });
+    wrap.appendChild(optsWrap);
+    wrap.appendChild(feedbackHolder);
+
+    if(solved){
+      var okFb = document.createElement('p');
+      okFb.className='feedback good';
+      okFb.textContent = item.feedbackGood;
+      feedbackHolder.appendChild(okFb);
+    }
+
+    return wrap;
+  }
+
+  function handleAnswer(lvl, idx, chosenIdx, wrap){
+    var item = lvl.items[idx];
+    var optsWrap = wrap.querySelector('.options');
+    var feedbackHolder = wrap.querySelector('.feedback-holder');
+    var buttons = optsWrap.querySelectorAll('.opt-btn');
+    feedbackHolder.innerHTML='';
+
+    if(chosenIdx === item.correct){
+      // Correct: lock in this item as solved, show the explanation + digit,
+      // then — and only then — reveal the next question (or the lock).
+      buttons.forEach(function(b,i){ b.disabled=true; if(i===chosenIdx) b.classList.add('correct'); });
+      var fb = document.createElement('p');
+      fb.className='feedback good';
+      fb.textContent = item.feedbackGood;
+      feedbackHolder.appendChild(fb);
+
+      state.progress[lvl.key][idx] = true;
+      saveState();
+
+      var hintBtn = wrap.querySelector('.hint-btn');
+      var hintText = wrap.querySelector('.hint-text');
+      if(hintBtn) hintBtn.remove();
+      if(hintText) hintText.remove();
+
+      setTimeout(function(){
+        wrap.classList.remove('active');
+        wrap.classList.add('solved');
+        var head = wrap.querySelector('.item-head');
+        var badge = document.createElement('div');
+        badge.className='digit-badge'; badge.textContent=encodeDigit(lvl, item.digit);
+        head.appendChild(badge);
+        advanceLevel(lvl, idx);
+      }, 900);
+    } else {
+      // Wrong: algorithm taunt + protocol clarification, retry the SAME
+      // question — the next one never appears until this one is correct.
+      // Also permanently ends this level's "flawless" streak (no penalty,
+      // just loses the bonus badge shown at the lock and on the credential).
+      state.flawless[lvl.key] = false;
+      saveState();
+      buttons.forEach(function(b,i){ if(i===chosenIdx) b.classList.add('wrong'); });
+      var parts = item.feedbackBad.split('///');
+      var algoLine = parts[0], protoLine = parts[1];
+
+      var fbA = document.createElement('p');
+      fbA.className='feedback bad';
+      fbA.textContent = 'ALGORITMO: '+algoLine;
+      var fbP = document.createElement('p');
+      fbP.className='feedback good';
+      fbP.textContent = 'PROTOCOLO_SEGURO: '+protoLine;
+      feedbackHolder.appendChild(fbA);
+      feedbackHolder.appendChild(fbP);
+
+      setTimeout(function(){
+        buttons.forEach(function(b){ b.classList.remove('wrong'); });
+      }, 900);
+    }
+  }
+
+  function advanceLevel(lvl, idx){
+    var levelIndex = lvl.num-1;
+    var nextIdx = idx+1;
+    var container = document.getElementById(lvl.key+'-items');
+    if(nextIdx < lvl.items.length){
+      var nextEl = buildItemEl(lvl, nextIdx, false, true);
+      container.appendChild(nextEl);
+      requestAnimationFrame(function(){
+        nextEl.scrollIntoView({behavior:'smooth', block:'center'});
+      });
+    } else {
+      refreshLevelLockVisibility(levelIndex);
+    }
+  }
+
+  function refreshLevelLockVisibility(levelIndex){
+    var lvl = LEVELS[levelIndex];
+    var allSolved = state.progress[lvl.key].every(Boolean);
+    var lockMount = document.getElementById(lvl.key+'-lock');
+    if(!lockMount) return;
+
+    var tip = document.getElementById('lateralTip');
+    if(tip) tip.style.display = allSolved ? 'flex' : 'none';
+
+    if(allSolved && !lockMount.dataset.built){
+      lockMount.dataset.built='1';
+      var lockEl = buildLock(lvl, levelIndex);
+      lockEl.classList.add('item-enter');
+      lockMount.appendChild(lockEl);
+      requestAnimationFrame(function(){
+        lockMount.scrollIntoView({behavior:'smooth', block:'center'});
+      });
+    }
+  }
+
+  function buildLock(lvl, levelIndex){
+    var wrap = document.createElement('div');
+    wrap.className='panel bracketed lock-wrap';
+    wrap.style.setProperty('--accent', lvl.accent || 'var(--protocol)');
+
+    if(state.flawless[lvl.key]){
+      var streakBadge = document.createElement('div');
+      streakBadge.className='streak-badge';
+      streakBadge.textContent='⚡ SIN ERRORES';
+      wrap.appendChild(streakBadge);
+    }
+
+    var label = document.createElement('div');
+    label.className='kicker'; label.style.textAlign='center';
+    label.textContent = lvl.cipherShift
+      ? 'CÓDIGO CIFRADO — DECODIFICA CADA LETRA Y ESCRIBE EL NÚMERO'
+      : 'CÓDIGO REVELADO — INGRÉSALO PARA ABRIR LA PUERTA';
+    wrap.appendChild(label);
+
+    var slotsWrap = document.createElement('div');
+    slotsWrap.className='code-slots';
+    var slots = [];
+    for(var i=0;i<4;i++){
+      var s = document.createElement('div');
+      s.className='code-slot revealed';
+      s.textContent = encodeDigit(lvl, lvl.code[i]);
+      slotsWrap.appendChild(s);
+      slots.push(s);
+    }
+    wrap.appendChild(slotsWrap);
+
+    var typedLabel = document.createElement('div');
+    typedLabel.className='kicker'; typedLabel.style.textAlign='center';
+    typedLabel.textContent='TU ENTRADA';
+    wrap.appendChild(typedLabel);
+
+    var typedWrap = document.createElement('div');
+    typedWrap.className='code-slots';
+    var typedSlots = [];
+    for(var j=0;j<4;j++){
+      var t=document.createElement('div');
+      t.className='code-slot';
+      typedWrap.appendChild(t);
+      typedSlots.push(t);
+    }
+    wrap.appendChild(typedWrap);
+
+    var typed = '';
+    function renderTyped(){
+      typedSlots.forEach(function(el,i){
+        el.textContent = typed[i]||'';
+        el.classList.toggle('filled', !!typed[i]);
+      });
+    }
+
+    var pad = document.createElement('div');
+    pad.className='keypad';
+    ['1','2','3','4','5','6','7','8','9','⌫','0','✔'].forEach(function(k){
+      var b = document.createElement('button');
+      b.type='button';
+      b.textContent=k;
+      if(k==='⌫' || k==='✔') b.classList.add('wide');
+      b.addEventListener('click', function(){
+        if(k==='⌫'){ typed = typed.slice(0,-1); renderTyped(); return; }
+        if(k==='✔'){ tryUnlock(); return; }
+        if(typed.length<4){ typed += k; renderTyped(); }
+        if(typed.length===4){ setTimeout(tryUnlock, 150); }
+      });
+      pad.appendChild(b);
+    });
+    wrap.appendChild(pad);
+
+    var lockFeedback = document.createElement('p');
+    lockFeedback.className='feedback bad'; lockFeedback.hidden=true;
+    wrap.appendChild(lockFeedback);
+
+    function tryUnlock(){
+      if(typed.length<4) return;
+      if(typed===lvl.code){
+        lockFeedback.hidden=true;
+        typedSlots.forEach(function(el){ el.classList.add('revealed'); });
+        state.levelDone[lvl.key]=true;
+        saveState();
+        pad.querySelectorAll('button').forEach(function(b){ b.disabled = true; });
+
+        var reveal = LETTER_REVEALS[lvl.key];
+        if(reveal){
+          // No auto-advance timer here on purpose: the student needs real
+          // time to read and write down the letter, so the screen waits
+          // for them to confirm rather than racing a clock.
+          var revealEl = document.createElement('div');
+          revealEl.className='letter-reveal item-enter';
+          revealEl.innerHTML = '<div class="letter-reveal-top"><div class="letter-badge">'+reveal.letter+'</div><p></p></div>';
+          revealEl.querySelector('p').textContent = reveal.text;
+          var continueBtn = document.createElement('button');
+          continueBtn.type='button'; continueBtn.className='btn';
+          continueBtn.textContent='YA LA ANOTÉ — CONTINUAR';
+          continueBtn.addEventListener('click', function(){ goToNextAfter(levelIndex); });
+          revealEl.appendChild(continueBtn);
+          wrap.appendChild(revealEl);
+          requestAnimationFrame(function(){
+            revealEl.scrollIntoView({behavior:'smooth', block:'center'});
+          });
+        } else {
+          setTimeout(function(){ goToNextAfter(levelIndex); }, 500);
+        }
+      } else {
+        lockFeedback.hidden=false;
+        lockFeedback.textContent = 'ALGORITMO: '+ALGO_LOCK_TAUNTS[Math.floor(Math.random()*ALGO_LOCK_TAUNTS.length)];
+        typedSlots.forEach(function(el){ el.classList.add('shake'); });
+        setTimeout(function(){
+          typedSlots.forEach(function(el){ el.classList.remove('shake'); });
+          typed='';
+          renderTyped();
+        }, 400);
+      }
+    }
+
+    return wrap;
+  }
+
+  function goToNextAfter(levelIndex){
+    if(levelIndex===0){ ensureLevelBuilt(1); showScreen('level2'); }
+    else if(levelIndex===1){ ensureLevelBuilt(2); showScreen('level3'); }
+    else if(levelIndex===2){ showScreen('level4'); }
+    updateHud();
+  }
+
+  var builtLevels = {};
+  function ensureLevelBuilt(idx){
+    if(!builtLevels[idx]){ renderLevel(idx); builtLevels[idx]=true; }
+  }
+
+  /* ================= FINAL LOCK ================= */
+
+  var MIN_PRINCIPLE_LEN = 12;
+  function principleLength(s){ return s.replace(/\s/g,'').length; }
+  function isPrincipleReady(s){ return principleLength(s) >= MIN_PRINCIPLE_LEN; }
+
+  function updateFinalProgress(){
+    // Live character counters: each field's own count/threshold, updated on
+    // every keystroke, so the 12-character minimum is never a silent rule —
+    // the student sees exactly how close they are and when it turns green.
+    ['1','2','3'].forEach(function(n){
+      var ta = document.getElementById('final'+n);
+      var counter = document.getElementById('counter'+n);
+      if(!ta || !counter) return;
+      var len = principleLength(ta.value);
+      var ready = len >= MIN_PRINCIPLE_LEN;
+      counter.textContent = 'Mínimo '+MIN_PRINCIPLE_LEN+' caracteres (actual: '+len+')';
+      counter.classList.toggle('ready', ready);
+    });
+
+    var vals = [
+      document.getElementById('final1').value,
+      document.getElementById('final2').value,
+      document.getElementById('final3').value
+    ];
+    var count = vals.filter(isPrincipleReady).length;
+    var el = document.getElementById('finalProgress');
+    if(!el) return;
+    el.textContent = count+' DE 3 PRINCIPIOS LISTOS';
+    el.classList.toggle('ready', count===3);
+  }
+  ['final1','final2','final3'].forEach(function(id){
+    document.getElementById(id).addEventListener('input', updateFinalProgress);
+  });
+
+  var finalWarn = document.getElementById('finalWarn');
+  var finalWarnWord = document.getElementById('finalWarnWord');
+  document.getElementById('finalBtn').addEventListener('click', function(){
+    var f1 = document.getElementById('final1').value.trim();
+    var f2 = document.getElementById('final2').value.trim();
+    var f3 = document.getElementById('final3').value.trim();
+    var word = document.getElementById('finalKeyword').value.trim();
+    function long(s){ return s.replace(/\s/g,'').length >= 12; }
+
+    if(!long(f1) || !long(f2) || !long(f3)){
+      finalWarn.hidden = false;
+      finalWarnWord.hidden = true;
+      return;
+    }
+    finalWarn.hidden = true;
+    if(word.toUpperCase() !== FINAL_KEYWORD){
+      finalWarnWord.hidden = false;
+      return;
+    }
+    finalWarnWord.hidden = true;
+
+    state.finals = [f1,f2,f3];
+    state.levelDone.level4 = true;
+    if(!state.finishedAt) state.finishedAt = Date.now();
+    saveState();
+    tick();
+    buildVictory();
+    showScreen('victory');
+  });
+
+  function buildVictory(){
+    var msg = document.getElementById('victoryMsg');
+    var name = state.name ? state.name : 'Estudiante';
+    msg.textContent = name+', identidad restaurada. Superaste el Laberinto de la Identidad, a los Cazadores de Huellas y rompiste tu Cámara de Eco. Tus tres principios quedan registrados como semilla de tu Decálogo de convivencia digital.';
+
+    var card = document.getElementById('summaryCard');
+    card.innerHTML='';
+
+    var stamp = document.createElement('div');
+    stamp.className='id-stamp';
+    stamp.innerHTML = 'IDENTIDAD<br>VERIFICADA ✓';
+    card.appendChild(stamp);
+
+    var kicker = document.createElement('div');
+    kicker.className='kicker'; kicker.textContent='SEMILLA DEL DECÁLOGO';
+    card.appendChild(kicker);
+
+    var nameEl = document.createElement('div');
+    nameEl.className='credential-name'; nameEl.textContent = name.toUpperCase();
+    card.appendChild(nameEl);
+
+    var initials = (name.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü]/g,'').slice(0,3) || 'EST').toUpperCase();
+    var credId = initials+'-'+LEVELS[0].code+'-'+LEVELS[1].code+'-'+LEVELS[2].code;
+    var idLine = document.createElement('div');
+    idLine.className='credential-id'; idLine.textContent = 'ID: '+credId;
+    card.appendChild(idLine);
+
+    var labels = [
+      'IDENTIDAD DIGITAL',
+      'PRIVACIDAD Y HUELLA DIGITAL',
+      'INFORMACIÓN Y VERIFICACIÓN'
+    ];
+    state.finals.forEach(function(text,i){
+      var d = document.createElement('div');
+      d.className='summary-item';
+      var l = document.createElement('div'); l.className='field-label'; l.textContent=labels[i];
+      var p = document.createElement('p'); p.textContent=text;
+      d.appendChild(l); d.appendChild(p);
+      card.appendChild(d);
+    });
+
+    var flawlessCount = ['level1','level2','level3'].filter(function(k){ return state.flawless[k]; }).length;
+    if(flawlessCount > 0){
+      var streakLine = document.createElement('div');
+      streakLine.className='summary-item';
+      var sl = document.createElement('div'); sl.className='field-label'; sl.textContent='RACHA PERFECTA';
+      var sp = document.createElement('p'); sp.textContent = flawlessCount+' de 3 fases resueltas sin errores ⚡';
+      streakLine.appendChild(sl); streakLine.appendChild(sp);
+      card.appendChild(streakLine);
+    }
+
+    var timeLine = document.createElement('div');
+    timeLine.className='summary-item';
+    var tl = document.createElement('div'); tl.className='field-label'; tl.textContent='TIEMPO DE FUGA';
+    var tp = document.createElement('p'); tp.textContent = elapsedLabel();
+    timeLine.appendChild(tl); timeLine.appendChild(tp);
+    card.appendChild(timeLine);
+  }
+
+  document.getElementById('copyBtn').addEventListener('click', function(){
+    var name = state.name || 'Estudiante';
+    var text = 'SEMILLA DEL DECÁLOGO — '+name+'\n\n'+
+      'Identidad digital: '+state.finals[0]+'\n\n'+
+      'Privacidad y huella digital: '+state.finals[1]+'\n\n'+
+      'Información y verificación: '+state.finals[2]+'\n';
+    var btn = document.getElementById('copyBtn');
+    function done(ok){
+      var original='COPIAR MIS PRINCIPIOS';
+      btn.textContent = ok ? '✔ COPIADO' : 'NO SE PUDO COPIAR — SELECCIONA MANUALMENTE';
+      setTimeout(function(){ btn.textContent=original; }, 1800);
+    }
+    try{
+      navigator.clipboard.writeText(text).then(function(){done(true);}, function(){done(false);});
+    }catch(e){ done(false); }
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', function(){
+    try{ localStorage.removeItem(STORAGE_KEY); }catch(e){}
+    window.location.reload();
+  });
+
+  /* ================= BOOT SEQUENCE ================= */
+  /* A short "intercepted terminal" curtain shown once, only the first time
+     the intro screen is reached (never on a mid-game restore). Tap anywhere
+     to skip; respects reduced-motion by not running at all. */
+
+  function runBootSequence(){
+    var overlay = document.getElementById('bootOverlay');
+    if(!overlay) return;
+
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(reduced){ overlay.remove(); return; }
+
+    var lines = [
+      '> RASTREANDO INTRUSIÓN...',
+      '> SEÑAL LOCALIZADA: DISPOSITIVO DEL ESTUDIANTE',
+      '> ACTIVANDO PROTOCOLO_SEGURO...',
+      '> CANAL DE EMERGENCIA ESTABLECIDO'
+    ];
+    var linesEl = document.getElementById('bootLines');
+    var i = 0, timer;
+
+    function showNext(){
+      if(i < lines.length){
+        var p = document.createElement('p');
+        p.textContent = lines[i];
+        linesEl.appendChild(p);
+        i++;
+        timer = setTimeout(showNext, 380);
+      } else {
+        timer = setTimeout(finish, 750);
+      }
+    }
+    function finish(){
+      overlay.classList.add('boot-fade');
+      setTimeout(function(){ overlay.remove(); }, 340);
+    }
+    overlay.addEventListener('click', function(){ clearTimeout(timer); finish(); });
+    showNext();
+  }
+
+  /* ================= START ================= */
+
+  document.getElementById('startBtn').addEventListener('click', function(){
+    var val = document.getElementById('nameInput').value.trim();
+    state.name = val || 'Estudiante';
+    if(!state.startedAt) state.startedAt = Date.now();
+    saveState();
+    ensureLevelBuilt(0);
+    showScreen('level1');
+  });
+
+  /* ================= INIT / RESTORE ================= */
+
+  loadState();
+  if(state.name) document.getElementById('nameInput').value = state.name;
+  document.getElementById('final1').value = state.finals[0]||'';
+  document.getElementById('final2').value = state.finals[1]||'';
+  document.getElementById('final3').value = state.finals[2]||'';
+  updateFinalProgress();
+
+  if(state.screen && state.screen!=='intro'){
+    var bootOverlayEl = document.getElementById('bootOverlay');
+    if(bootOverlayEl) bootOverlayEl.remove();
+    ensureLevelBuilt(0);
+    if(state.levelDone.level1) ensureLevelBuilt(1);
+    if(state.levelDone.level2) ensureLevelBuilt(2);
+    if(state.screen==='victory') buildVictory();
+    showScreen(state.screen);
+  } else {
+    updateHud();
+    runBootSequence();
+  }
+  tick();
+
+})();
+</script>
+
+</body>
+</html>
